@@ -58,6 +58,17 @@ graph TD
 
 ---
 
+## 📊 Verification & Stress Benchmarking
+
+We have included `test_photonic_pipeline.py` to verify the numerical homeostasis of this infrastructure.
+Run the 50-iteration simulation with an 88% dropout rate using:
+```bash
+python test_photonic_pipeline.py
+```
+*Expected output confirms zero-leakage via CUDA Events.*
+
+---
+
 ## 🧬 Detailed Tier Specifications & Subroutines (PoC Overview)
 
 The following sections outline our early-stage exploratory efforts across each architectural tier. We warmly welcome any feedback or optimizations from the community.
