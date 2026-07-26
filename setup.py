@@ -44,12 +44,12 @@ extra_compile_args = {
 photonic_native_extension = CUDAExtension(
     name="torch_photonic_bridge_fence_backend", # Match name exactly with __init__.py linkage token
     sources=[
-        "src/photonic_mesh_core_kernel.cu",     // Layer 1: Branchless PTX MUX Kernel
-        "src/photonic_bridge_wrapper.cpp"       // Layer 1.5: RAII Lifecycle Capsule Fence Bridge
+        "src/photonic_mesh_core_kernel.cu",     # // Layer 1: Branchless PTX MUX Kernel
+        "src/photonic_bridge_wrapper.cpp"      # // Layer 1.5: RAII Lifecycle Capsule Fence Bridge
     ],
     extra_compile_args=extra_compile_args,
     library_dirs=[],
-    libraries=["cuda"]                         // Directly link against native CUDA driver runtime layers
+    libraries=["cuda"]                        # // Directly link against native CUDA driver runtime layers
 )
 
 # ❸ Package Manifest Metadata Mapping Factory
