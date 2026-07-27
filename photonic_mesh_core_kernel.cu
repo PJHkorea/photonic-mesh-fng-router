@@ -96,9 +96,6 @@ __global__ void photonic_jitter_squelch_cuda_kernel(
     );
 
     
-    // Commit back into unified memory grid view
-    d_purified_tensor[thread_idx] = purified_output;
-}
 
 
     // ❽ Unified Memory Grid View Commit Barrier
