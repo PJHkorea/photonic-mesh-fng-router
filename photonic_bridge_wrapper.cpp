@@ -12,20 +12,20 @@
 #include <cuda_runtime.h>
 #include <stdexcept>
 
-// 🛡️ RAII Hardware Lifecycle Fence Object (최종 완결본: 드라이버 누수 0% 철옹성 구조)
+// 🛡️ RAII Hardware Lifecycle Fence Object (Final Blueprint: 0% Driver Leak Inviolable Structure)
 // Locks out the python interpreter threads & seals memory mutation vectors during active GPU execution.
 class PhotonicExecutionGuard {
 public:
-    // PyTorch 스트림과 커널 전용 내부 비동기 스트림 간의 파이프라인 정렬을 수행하도록 시그니처 변경
+    // Permutes signature to execute pipeline alignment between the incoming PyTorch stream and the dedicated internal async stream.
     explicit PhotonicExecutionGuard(cudaStream_t torch_stream, cudaStream_t kernel_stream) 
         : torch_stream_(torch_stream), kernel_stream_(kernel_stream), start_event_(nullptr) {
         
-        // 1. 타이밍 수집 부하가 전혀 없는 가벼운 가속기 제어용 이벤트 플래그 생성
+        // 1. Instantiates a lightweight accelerator-control event flag entirely free of profiling/timing capture overhead.
         cudaError_t err = cudaEventCreateWithFlags(&start_event_, cudaEventDisableTiming);
         if (err == cudaSuccess) {
-            // 2. PyTorch 진입 스트림의 현재 작업 완료 시점을 이벤트를 낚아챔 (CPU 블로킹 제로)
+            // 2. Intercepts the completion point of the current operation on the ingress PyTorch stream (0-ns CPU blocking).
             cudaEventRecord(start_event_, torch_stream_);
-            // 3. 커널 실행 전용 스트림이 PyTorch 스트림의 작업 완료를 기다리도록 교차 하드웨어 펜스 설정
+            // 3. Implants a cross-hardware fence forcing the dedicated kernel execution stream to wait for PyTorch stream resolution.
             cudaStreamWaitEvent(kernel_stream_, start_event_, 0);
         } else {
             throw std::runtime_error("FNG_BRIDGE_FATAL: Failed to initialize non-blocking hardware event fence.");
@@ -34,25 +34,26 @@ public:
 
     ~PhotonicExecutionGuard() {
         if (start_event_) {
-            // 4. 커널 전용 내부 스트림의 실행 완료 이벤트를 다시 PyTorch 스트림에 동기화
+            // 4. Synchronizes the completion event of the dedicated internal kernel stream back onto the primary PyTorch stream.
             cudaEventRecord(start_event_, kernel_stream_);
             cudaStreamWaitEvent(torch_stream_, start_event_, 0);
             
-            // ⚠️ [안심 가이드 반영]: 드라이버 레벨의 지연 해제 버그를 원천 차단하기 위해 
-            // 소멸자 내부에서 cudaEventDestroy를 직접 호출하는 행위를 전면 금지합니다.
-            // 만약 상단 함수가 소유권을 수거해 가지 않았다면(Release 미호출) 여기서 임시 조치하되,
-            // 기본 설계는 release()를 통해 함수 스코프 맨 밑바닥에서 명시적으로 파괴하도록 유도합니다.
+            // ⚠️ [DRIVER INTEGRITY GUARD]: To fundamentally preempt driver-level delayed release bugs, 
+            // directly invoking cudaEventDestroy within the destructor scope is strictly discouraged as a default path.
+            // If the outer frame failed to harvest ownership (Release uncalled), it is handled here as an emergency fallback; 
+            // however, the baseline architecture enforces explicit destruction at the absolute bottom of the function scope via release().
             cudaEventDestroy(start_event_);
         }
     }
 
-    // 🎯 [핵심 추가]: RAII 가드 객체가 파괴되어도 이벤트 핸들이 함수 최하단까지 살아남도록 
-    // 내부 자원 포인터의 소유권을 상위 래퍼 함수로 이전(Transfer)하는 안심 릴리즈 메커니즘
+    // 🎯 [CORE EXTENSION]: Secure release mechanism designed to transfer internal resource handle ownership 
+    // to the upper wrapper function, ensuring the event handle outlives the RAII guard instance destruction.
     [[nodiscard]] cudaEvent_t release() noexcept {
         cudaEvent_t temp_handle = start_event_;
-        start_event_ = nullptr; // 소멸자에서 cudaEventDestroy가 중복 실행되는 것을 완전 차단
+        start_event = nullptr; // Double-destruction vectors are entirely nullified by severing the reference before destructor firing.
         return temp_handle;
     }
+
 
     // Explicitly disable copy/move allocation profiles to guarantee 0-byte structural integrity
     PhotonicExecutionGuard(const PhotonicExecutionGuard&) = delete;
@@ -89,13 +90,13 @@ torch::Tensor forward_photonic_bridge_fence(
         throw std::invalid_argument("FNG_BRIDGE_ERROR: Input tensors must reside entirely on the GPU boundary.");
     }
     
-    // 멀티 GPU 가속 인프라 환경에서 컨텍스트 스왑 노이즈 및 장치 미스매치 크래시를 방지하기 위해 
-    // 입력 데이터가 활성화된 VRAM 영역에 디바이스 가드를 물리적으로 결착(Pinning)합니다.
+       // To preempt context-switch noise and device-mismatch crashes within multi-GPU acceleration infrastructures, 
+    // the device guard is physically pinned to the active VRAM region harboring the input data.
     at::cuda::CUDAGuard device_guard(pytorch_raw_pulse.device());
 
-    // ❷ Zero-Copy Paradigm Enforcement: 암묵적 메모리 카피 버블 원천 차단
-    // 런타임에 내부 메모리를 새로 파고 복사(Deep Copy)하는 .to()나 .contiguous() 호출을 전면 제거합니다.
-    // 대신 상단 프레임워크가 컴파일 단계에서 데이터를 완벽히 정렬해 오도록 예외 처리를 통해 하드웨어 제약 조건을 강제합니다.
+    // ❷ Zero-Copy Paradigm Enforcement: Eradicates Implicit Memory Copy Bubbles
+    // Deep-copying routines such as .to() or .contiguous() allocations that forge new internal memory sectors at runtime are completely excised.
+    // Instead, upstream frameworks are strictly enforced via exception pathways to pre-align data layers during the compilation stage.
     if (pytorch_oni_mask.scalar_type() != torch::kInt32) [[unlikely]] {
         throw std::invalid_argument("FNG_BRIDGE_ERROR: pytorch_oni_mask must be explicitly pre-allocated as torch.int32.");
     }
@@ -109,8 +110,8 @@ torch::Tensor forward_photonic_bridge_fence(
                               .dtype(torch::kFloat32)
                               .device(pytorch_raw_pulse.device());
 
-       // ❷ Memory Allocation Zero-Copy Shell
-    // 불필요한 언매니징 메모리 버블 생성 없이 목적지 뷰포트 영역만 빠르게 pre-allocate 합니다.
+    // ❷ Memory Allocation Zero-Copy Shell
+    // Swiftly pre-allocates the destination viewport array alone, circumventing the creation of unmanaged runtime memory bubbles.
     torch::Tensor purified_output_tensor = torch::empty(pytorch_raw_pulse.sizes(), tensor_options);
 
     // ❸ Atomically Extract 64-bit Virtual Memory Address Pointers
@@ -122,14 +123,13 @@ torch::Tensor forward_photonic_bridge_fence(
     c10::cuda::CUDAStream current_torch_stream = c10::cuda::getCurrentCUDAStream(pytorch_raw_pulse.device().index());
     cudaStream_t native_torch_stream = current_torch_stream.stream();
 
-    // [추가/수정] 파이썬 GC와 Autograd 추적 노이즈로부터 물리적 하드웨어 파이프라인을 완전히 분리하기 위해 
-    // 커널 전용의 고속 내부 비동기 스트림(Kernel Execution Stream)을 별도로 확보합니다.
-    // (성능 극대화를 위해 하이-프라이오리티 스트림이나 풀링된 고정 스트림 컨텍스트를 사용할 수 있습니다.)
+       // [REFACTORED]: Allocates a dedicated internal asynchronous stream (Kernel Execution Stream) 
+    // to thoroughly isolate the physical hardware pipeline from Python GC spikes and Autograd tracing overhead.
+    // (Note: High-priority streams or pooled static stream contexts can be deployed to further maximize throughput.)
     cudaStream_t native_kernel_stream;
     cudaStreamCreateWithFlags(&native_kernel_stream, cudaStreamNonBlocking);
 
-    // [안심 가이드 반영] 가드 객체 밖에서 이벤트 핸들을 안전하게 수거할 바구니 선언
-        // [안심 가이드 반영] 가드 객체 밖에서 이벤트 핸들을 안전하게 수거할 바구니 선언
+    // [DRIVER INTEGRITY GUARD]: Declares an external handle repository to safely harvest the event pointer outside the guard scope.
     cudaEvent_t event_to_destroy = nullptr;
 
     {
@@ -145,33 +145,33 @@ torch::Tensor forward_photonic_bridge_fence(
             native_kernel_stream
         );
 
-        // 🎯 [수정 및 교정]: 소멸자 호출 전 release()를 통해 소유권을 외부 핸들로 안전하게 가로챕니다.
+        // 🎯 [CORRECTED]: Securely hijacks handle ownership into the external register via release() prior to destructor invocation.
         event_to_destroy = lifecycle_fence.release();
-    } // <- lifecycle_fence 소멸자 자동 호출; 내부 핸들이 nullptr이므로 중복 파괴 및 버그가 완전 차단됩니다.
+    } // <- Lifecycle_fence destructor automatically triggers; double-destruction vectors are entirely nullified since the internal handle is now nullptr.
 
-    // ❼ [하드웨어 안심 가이드 최종 지점]: 
-    // 비동기 커널이 하드웨어 큐에 완벽히 등록된 직후, 안전한 호스트 스코프에서 이벤트를 최종 파기합니다.
+    // ❼ [HARDWARE INTEGRITY BOUNDARY]: 
+    // Deterministically destroys the event handle within a safe host scope immediately after the async kernel is fully enlisted in the hardware queue.
     if (event_to_destroy) [[likely]] {
         cudaEventDestroy(event_to_destroy);
     }
 
-    // 사용이 끝난 내부 비동기 스트림 핸들을 파기합니다.
+    // Disposes of the depleted internal asynchronous stream context.
     cudaStreamDestroy(native_kernel_stream);
 
-    // ❽ Return the clean, purified tensor view directly compatible with Llama/DeepSeek rails
+
+     // ❽ Return the clean, purified tensor view directly compatible with Llama/DeepSeek rails
     return purified_output_tensor;
 }
 
-
-
 // 📝 PyBind11 High-Speed Binary Module Binding Blueprint
-// [무결성 입증] 컴파일 시 NVCC 및 GCC 링커가 PyTorch 프레임워크 바이너리 버스에 
-// 이 C++ 익스텐션 모듈을 0ns 오버헤드로 직접 접착할 수 있도록 블루프린트 명세를 고정합니다.
+// [PROVING SYSTEM INTEGRITY]: Standardizes and freezes the blueprint specifications to enable NVCC and GCC linkers 
+// to statically fuse this C++ extension module directly onto the PyTorch framework binary bus with absolute 0-ns overhead during compilation.
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def(
         "forward_photonic_bridge_fence", 
         &forward_photonic_bridge_fence, 
         "0ns High-Density PyTorch-to-CUDA Optical Infrastructure Isolation Bridge (Apache 2.0)",
-        py::call_guard<py::gil_scoped_release>() // [추가] C++ 내부 진입 시 파이썬 GIL을 해제하여 런타임 스레드 스왑 노이즈 완전 격리
+        py::call_guard<py::gil_scoped_release>() // [ADDED]: Releases the Python GIL upon C++ entry to thoroughly isolate runtime thread-swapping noise.
     );
 }
+
