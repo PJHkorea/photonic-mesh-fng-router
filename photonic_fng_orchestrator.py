@@ -33,7 +33,7 @@ def execute_optical_viscous_rectifier_kernel(raw_pulse_stream, phase_jitter_mask
         raw_pulse_stream:  f32[Time_Steps, Batch, Jitter_Axis, Head_Dim] (Photonic Wave Matrix)
         phase_jitter_mask: f32[Time_Steps, Batch, Jitter_Axis, 1]        (Hardware Error Mask)
     """
-    target_dtype = raw_pulse_stream.dtype
+      target_dtype = raw_pulse_stream.dtype
     jitter_axis_size = raw_pulse_stream.shape[2]
     
     # ❶ Continuous 2nd-Order Spatial Laplacian Finite-Difference Scheme
@@ -56,6 +56,10 @@ def execute_optical_viscous_rectifier_kernel(raw_pulse_stream, phase_jitter_mask
     
     # 2차 공간 라플라시안 미분 수식을 최종 도출합니다. (XLA가 완벽하게 단일 하드웨어 융합 연산으로 묶어냅니다.)
     laplacian_wavefront = shifted_right + shifted_left - (2.0 * raw_pulse_stream)
+
+    # [🎯 복원 완료] 하단부에서 참조할 유실된 감쇠 방정식(Viscous Dissipation)을 추가합니다.
+    viscosity_alpha = 0.015
+    damped_wavefront = raw_pulse_stream + (viscosity_alpha * laplacian_wavefront)
 
     
        # (이전 ❶번 라플라시안 선형 가속 수식 하단부와 연결)
@@ -93,22 +97,11 @@ def compute_photonic_attention_rail_fusion(optical_q, optical_k, optical_v, oni_
     """
     🟩 Layer 2 High-Level Governance: Orchestrates the macro-scale photonic routing conduits.
     Resolves 4D-to-3D dimensional alignment in 0ns, bypassing physical data replication.
-    
-    Inputs:
-        optical_q:          f32[Batch, Seq_Len, Hidden_Dim] (Standard 3D Llama Layout Format)
-        optical_k / v:      f32[Time_Steps, Distributed_Nodes, Jitter_Axis, Head_Dim] (4D Photonic Stream)
-        oni_fault_register: f32[Time_Steps, Distributed_Nodes, Jitter_Axis, 1]        (4D Fault Array)
     """
-
-       # ❶ Fire the branchless 3D-Restored Shard-Map across the hardware-native optical fabric ring
-    # [리팩토링] 하드웨어 디바이스 레벨에서 지터 제거, 타임슬라이싱, All-Gather 동기화가 
-    # 모두 끝난 완벽한 통합 3D 텐서가 0ns 무복사 형태로 즉시 추출됩니다.
+    # 🎯 [인덴트 정렬] 좌측 공백을 주석 블록 스코프와 동일하게 4칸(1 tab)으로 통일합니다.
+    # ❶ Fire the branchless 3D-Restored Shard-Map across the hardware-native optical fabric ring
     fused_k_3d = fused_optical_shard_map_orchestrator(optical_k, oni_fault_register)
     fused_v_3d = fused_optical_shard_map_orchestrator(optical_v, oni_fault_register)
-    
-    # ❷ 4D-to-3D Zero-Copy Dimensional Realignment:
-    # [삭제 완료] purified_k_4d[-1] 형태의 중복 파이썬 슬라이싱 버그를 완벽하게 제거했습니다.
-    # 이제 fused_k_3d와 fused_v_3d는 Llama-4 / DeepSeek-V4 attention 규격과 완벽히 호환되는 3D 셰이프를 유지합니다.
     
     # ❸ Scale-Factor Derivation for Fused Attention Matrix Circuits
     head_dim = optical_q.shape[-1]
@@ -118,15 +111,12 @@ def compute_photonic_attention_rail_fusion(optical_q, optical_k, optical_v, oni_
     inv_sqrt_scale = jax.lax.reciprocal(jnp.sqrt(scale_factor))
     
     # ❹ Hardware Circuit Coupling with Standard 3D Query Tensor
-    # Transpose Key tensor via compile-time static layout transformations to fire parallel matmul loops
-    # [무결성 확인] 3D 형상이 완전히 정렬되어 컴파일러가 수평 확장 레이아웃 변환 명령을 완벽히 행렬 가속기로 밀어 넣습니다.
     attention_scores = jnp.matmul(optical_q, jnp.transpose(fused_k_3d, (0, 2, 1))) * inv_sqrt_scale
     attention_weights = jax.nn.softmax(attention_scores, axis=-1)
     
     # Final matrix multiplication to yield the clean physical context vector manifold
     context_vector = jnp.matmul(attention_weights, fused_v_3d)
     
-    # Emits a pristine 3D output while strictly maintaining a 0-byte memory foot-print
     return context_vector
 
 
