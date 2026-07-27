@@ -151,12 +151,16 @@ void execute_photonic_jitter_squelch_kernel(
         total_elements
     );
 
-    // 3. 디스패치 에러 트래킹 부하를 컴파일러 힌트([[unlikely]])를 사용하여 파이프라인에서 완전히 격리합니다.
-    // 일반적인 정상 작동(cudaSuccess) 시에는 printf나 스트링 파싱을 위한 CPU 오버헤드가 완전히 0ns가 됩니다.
+       // 3. C++20 표준 속성 위치 수정 및 비동기 파이프라인 최적화
     cudaError_t dispatch_err = cudaGetLastError();
-    if ([[unlikely]] (dispatch_err != cudaSuccess)) {
-        printf("[FNG KERNEL FATAL]: PTX MUX Kernel launch failed: %s (Block: %d, Grid: %d)\n", 
-               cudaGetErrorString(dispatch_err), block_size, grid_size);
+    
+    // [[unlikely]] 속성을 중괄호 앞에 올바르게 배치하여 분기 예측 부하를 0ns로 유지
+    if (dispatch_err != cudaSuccess) [[unlikely]] {
+        // 프로덕션 환경에서 호스트 스트림을 마비시키는 printf 대신 
+        // 런타임이 에러를 잡아서 복구 메커니즘을 돌릴 수 있도록 표준 예외를 발생시키거나 리턴합니다.
+        throw std::runtime_error("[FNG KERNEL FATAL]: PTX MUX Kernel launch failed: " + 
+                                 std::string(cudaGetErrorString(dispatch_err)));
     }
 }
-} // extern "C"
+
+    } // extern "C"
