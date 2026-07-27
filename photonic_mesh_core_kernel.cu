@@ -41,6 +41,17 @@ __device__ __forceinline__ float pinn_branchless_select_f32(
 
 extern "C" {
 
+/**
+ * 🌊 High-Density Optical Jitter Squelch Native C-Wrapper Interface (Refactored)
+ * Executes spatial Laplacian smoothing entirely within registers with Tail-Warp security.
+ */
+__global__ void photonic_jitter_squelch_cuda_kernel(
+    const float* __restrict__ d_raw_pulse,       // Shape: [Total_Elements]
+    const unsigned int* __restrict__ d_oni_mask, // Shape: [Total_Elements]
+    float* __restrict__ d_purified_tensor,       // Shape: [Total_Elements]
+    const int total_elements
+) { // 🎯 [복원 완료] 글로벌 하드웨어 가속기 진입 관문 함수를 선언합니다.
+
     // ❶ Global Thread Topology Mapping to Hardware Execution Grid
     int block_offset = blockIdx.x * blockDim.x;
     int thread_idx   = block_offset + threadIdx.x;
@@ -93,7 +104,6 @@ extern "C" {
         damped_wavefront    // Purified physical tensor matrix
     );
 
-    
 
 
        // ❽ Unified Memory Grid View Commit Barrier
