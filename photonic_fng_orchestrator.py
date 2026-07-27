@@ -74,11 +74,7 @@ fused_optical_shard_map_orchestrator = shard_map(
     mesh=photonic_hardware_mesh,
     in_specs=(P(None, "optical_fabric_axis", None, None), P(None, "optical_fabric_axis", None, None)),
     out_specs=P(None, None, None) 
-),
-    # [무결성 확정] 컴파일 단에서 축 레이아웃 왜곡 없이 유니파이드 3D 정적 매니폴드로 완전 동결합니다.
-    out_specs=P(None, None, None) 
 )
-
 
 
 def compute_photonic_attention_rail_fusion(optical_q, optical_k, optical_v, oni_fault_register):
