@@ -40,8 +40,9 @@ def create_fng_interleaved_optical_attention_forward(self):
             
         # ❸ Layer 1.5 C++ Capsule Fence Ingestion
         # C++ 입구 가드가 contiguous를 강제하므로 유일하게 변형 여지가 있는 마스크 세트만 체크합니다.
-        if not oni_fault_mask.is_contiguous(): [[unlikely]]
+        if not oni_fault_mask.is_contiguous():
             oni_fault_mask = oni_fault_mask.contiguous()
+
             
         purified_torch_pulse = bridge_backend.forward_photonic_bridge_fence(
             key_states, 
