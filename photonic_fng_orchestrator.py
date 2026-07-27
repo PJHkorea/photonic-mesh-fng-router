@@ -12,14 +12,9 @@ import jax.numpy as jnp
 from jax.experimental.shard_map import shard_map
 from jax.sharding import Mesh, PartitionSpec as P
 
-# 🧊 STEP 1: Global Photonics Topology Static Configuration
-# Pre-allocates and freezes the 8-node optical datacenter mesh grid layout at boot time.
-devices = jax.devices()
-if len(devices) < 1:
-    raise RuntimeError("FNG_ORCHESTRATOR_FATAL: No hardware accelerators detected inside the topology mesh.")
-
-# Flatten device geometry to match the physical fiber optic routing axis
-optical_mesh_devices = jnp.array(devices).reshape(-1)
+# [교정] 다중 노드 분산 환경을 위한 global_devices() 채택 및 Mesh 설정
+global_accelerators = jax.global_devices()
+optical_mesh_devices = jnp.array(global_accelerators).reshape(-1)
 photonic_hardware_mesh = Mesh(optical_mesh_devices, axis_names=("optical_fabric_axis",))
 
 
@@ -67,14 +62,9 @@ def execute_optical_viscous_rectifier_kernel(raw_pulse_stream, phase_jitter_mask
     
     # [리팩토링/추가] 4D-to-3D 차원 붕괴 에러를 완벽히 예방합니다.
     # 4D의 0번 축(Time_Steps)에서 마지막 프레임만 정적으로 슬라이싱하여 3D로 압축합니다.
-    last_frame_3d = purified_pulse_stream[-1]  # Shape: [Nodes_slice, Jitter_Axis, Head_Dim]
-    
-    # [교정 완료] 분산 수집 연산 시 기존 축을 손상하지 않고, 최상위 가속기 비동기 메모리 버스에 
-    # 새로운 독립 차원 축을 확보하며 취합하도록 axis 설정을 안정화합니다.
-    # 이 연산을 통과하면 외부 out_specs 명세 규격인 P(None, None, None)과 컴파일 타임에 완벽히 정렬됩니다.
+    last_frame_3d = purified_pulse_stream[-1]
     gathered_context_3d = jax.lax.all_gather(last_frame_3d, axis_name="optical_fabric_axis", axis=0)
-    
-    return gathered_context_3d  # 완벽하게 복원된 3D 대형 텐서 형태로 탈출합니다.
+    return gathered_context_3d
 
 
 # ⛓️ STEP 2: [★ THE SIGNATURE TEMPLATE ★] Static 4D-to-3D Photonic Shard-Map Binding
@@ -82,10 +72,9 @@ def execute_optical_viscous_rectifier_kernel(raw_pulse_stream, phase_jitter_mask
 fused_optical_shard_map_orchestrator = shard_map(
     execute_optical_viscous_rectifier_kernel,
     mesh=photonic_hardware_mesh,
-    in_specs=(
-        P(None, "optical_fabric_axis", None, None),  # raw_pulse_stream 4D 구조
-        P(None, "optical_fabric_axis", None, None),  # phase_jitter_mask 4D 구조
-    ),
+    in_specs=(P(None, "optical_fabric_axis", None, None), P(None, "optical_fabric_axis", None, None)),
+    out_specs=P(None, None, None) 
+),
     # [무결성 확정] 컴파일 단에서 축 레이아웃 왜곡 없이 유니파이드 3D 정적 매니폴드로 완전 동결합니다.
     out_specs=P(None, None, None) 
 )
