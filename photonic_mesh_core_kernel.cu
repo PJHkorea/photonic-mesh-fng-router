@@ -24,13 +24,13 @@ __device__ __forceinline__ float pinn_branchless_select_f32(
 ) {
     float output_reg;
     
-    // 1. C++ bool/int 값을 PTX 1비트 조건자 레지스터(%p)로 매핑하기 위해 setp(set predicate) 사용
-    // 2. selp.f32 명령어로 조건자 레지스터 값에 따라 1비트 클럭 내에 레지스터 스왑 수행
+       // 1. Deploys 'setp' (set predicate) to map the C++ bool/int input directly into the PTX 1-bit predicate register (%p).
+    // 2. Executes a single-clock register swap via the 'selp.f32' instruction based on the predicate register condition.
     asm (
         "{\n\t"
-        "  .reg .pred %p;\n\t"           // 1비트 전용 조건자 레지스터 선언
-        "  setp.ne.u32 %p, %3, 0;\n\t"   // condition(%3)이 0이 아니면 %p를 true로 설정
-        "  selp.f32 %0, %1, %2, %p;\n\t" // %p 조건에 따라 true_val 또는 false_val 선택
+        "  .reg .pred %p;\n\t"           // Declares a dedicated 1-bit predicate register.
+        "  setp.ne.u32 %p, %3, 0;\n\t"   // Sets %p to true if condition (%3) evaluates to non-zero.
+        "  selp.f32 %0, %1, %2, %p;\n\t" // Conditionally selects true_val or false_val depending on the %p predicate bit.
         "}"
         : "=f"(output_reg)
         : "f"(true_val), "f"(false_val), "r"((unsigned int)condition)
@@ -50,35 +50,35 @@ __global__ void photonic_jitter_squelch_cuda_kernel(
     const unsigned int* __restrict__ d_oni_mask, // Shape: [Total_Elements]
     float* __restrict__ d_purified_tensor,       // Shape: [Total_Elements]
     const int total_elements
-) { // 🎯 [복원 완료] 글로벌 하드웨어 가속기 진입 관문 함수를 선언합니다.
+) { // 🎯 [RESTORED]: Declares the physical ingress gateway function for the global hardware accelerator.
 
     // ❶ Global Thread Topology Mapping to Hardware Execution Grid
     int block_offset = blockIdx.x * blockDim.x;
     int thread_idx   = block_offset + threadIdx.x;
     
-    // 조기 return 제거 유지, 유효 스레드 플래그 생성
+    // Maintains the omission of early return branches; isolates valid execution states via thread mask flag.
     bool is_valid_thread = (thread_idx < total_elements);
     
     // ❷ Tiled Warp Partitioning (Clustering 32-threads as a single physical execution unit)
     cg::thread_block_tile<32> warp_tile = cg::tiled_partition<32>(cg::this_thread_block());
     int lane_id = warp_tile.thread_rank();
     
-    // 유효하지 않은 쓰레드는 0.0f가 아니라 '자신의 경계면 데이터' 오염을 막기 위해 
-    // 유효한 이웃 쓰레드가 참조할 수 있도록 직전/직후의 더미 처리가 필요하지만, 
-    // 레지스터 레벨에서는 유효 비트를 함께 셔플하는 것이 가장 안전합니다.
+    // To preempt boundary data corruption, invalid threads must bypass dummy boundary padding;
+    // at the registers hardware boundary, shuffling the validation state bit alongside active data arrays offers optimal security.
     float raw_pulse_register  = is_valid_thread ? d_raw_pulse[thread_idx] : 0.0f;
     unsigned int raw_oni_mask = is_valid_thread ? d_oni_mask[thread_idx] : 0;
     
     // ❸ 1-Clock Crossbar Shuffling & Validity Propagation
-    // 데이터와 함께 '이 데이터가 진짜 유효한가?'의 여부(is_valid)도 함께 셔플합니다.
+    // Concurrently propagates data elements alongside their deterministic validation state flag (is_valid) across the registers bus.
     float right_neighbor = warp_tile.shfl_down(raw_pulse_register, 1);
     float left_neighbor  = warp_tile.shfl_up(raw_pulse_register, 1);
+
     
-    unsigned int has_right_data = warp_tile.shfl_down((unsigned int)is_valid_thread, 1);
+      unsigned int has_right_data = warp_tile.shfl_down((unsigned int)is_valid_thread, 1);
     unsigned int has_left_data  = warp_tile.shfl_up((unsigned int)is_valid_thread, 1);
     
-    // ❹ Boundary Clamping: 물리적 경계(0, 31)뿐만 아니라 '논리적 데이터 경계'까지 동시 방어
-    // 우측에 유효한 데이터가 없거나(Tail block 경계), 하드웨어 워프 끝(31)이면 자기 자신 복사
+    // ❹ Boundary Clamping: Concurrently guards the logical data boundary as well as the physical warp limits (0, 31).
+    // Replicates its own register state if no valid data exists to the right (tail block fringe) or the physical warp boundary (31) is reached.
     bool is_right_edge = (lane_id == 31) || (has_right_data == 0);
     bool is_left_edge  = (lane_id == 0)  || (has_left_data == 0);
     
@@ -91,24 +91,24 @@ __global__ void photonic_jitter_squelch_cuda_kernel(
     float damped_wavefront    = raw_pulse_register + (viscosity_alpha * laplacian_wavefront);
     
     // ❻ Global Shock-wave Fault Telemetry Gathering
-    // 각 쓰레드의 결함 유무(0 혹은 1 이상)를 하드웨어 원자적 활성 마스크(0xFFFFFFFF) 기반으로 완벽 동기 수집
-    // 가짜 패딩 쓰레드가 마스크를 오염시키지 않도록 is_valid_thread 조건 병합
+    // Executes synchronous hardware ballot aggregation across all active threads to capture the exact error state flag mask based on the 32-bit hardware active mask (0xFFFFFFFF).
+    // Merges the is_valid_thread constraint to prevent out-of-boundary padding lanes from corrupting the telemetry mask.
     unsigned int global_oni_active = warp_tile.ballot(is_valid_thread && (raw_oni_mask > 0));
     
-    // ❼ Micro-circuit Multiplexing: 내 레인 ID에 해당하는 비트만 정확히 추출
+    // ❼ Micro-circuit Multiplexing: Surgically extracts the specific bit corresponding to the local lane ID.
     bool local_oni_fault = (global_oni_active & (1u << lane_id)) != 0;
     
     float purified_output = pinn_branchless_select_f32(
-        local_oni_fault,    // 내 레인의 결함 유무 비트 전달
+        local_oni_fault,    // Dispatches the extracted local lane hardware fault register status.
         0.0f,               // Clean vacuum erasure state
         damped_wavefront    // Purified physical tensor matrix
     );
 
 
 
-       // ❽ Unified Memory Grid View Commit Barrier
-    // 동기화 연산을 위해 살려두었던 테일 레인(Tail lanes)들이 
-    // 글로벌 메모리 경계 밖을 침범하여 쓰기 연산을 수행하지 않도록 물리적 가드를 적용합니다.
+        // ❽ Unified Memory Grid View Commit Barrier
+    // Implants a physical address guard to rigorously block loose padding tail-lanes (kept active solely for warp-level sync) 
+    // from breaching out-of-boundary global memory segments during memory write commits.
     if (thread_idx < total_elements) {
         d_purified_tensor[thread_idx] = purified_output;
     }
@@ -127,8 +127,8 @@ void execute_photonic_jitter_squelch_kernel(
 ) {
     if (total_elements <= 0) return;
 
-    // 1. 하드코딩된 256을 제거하고, 현재 GPU 아키텍처의 레지스터/SMem 한계에 맞추어 
-    // 하드웨어 점유율(Occupancy)을 극대화하는 블록 및 그리드 크기를 런타임에 자동 계산합니다.
+    // 1. Excises the hardcoded 256 layout; dynamically computes the optimal block and grid dimensions at runtime 
+    // to maximize hardware hardware occupancy relative to the registers and shared memory limitations of the active GPU architecture.
     int block_size = 0;
     int min_grid_size = 0;
     
@@ -136,11 +136,11 @@ void execute_photonic_jitter_squelch_kernel(
         &min_grid_size,
         &block_size,
         (void*)photonic_jitter_squelch_cuda_kernel,
-        0,  // 동적 공유 메모리(Dynamic Shared Memory) 사용량
-        0   // 블록 크기 제한 없음
+        0,  // Dynamic Shared Memory (SMem) allocation profile.
+        0   // Bypasses static block size upper bounds.
     );
 
-    // 요소 개수에 맞춘 실제 그리드 사이즈 매핑
+    // Maps the actual execution grid dimensions aligned with total element boundaries.
     int grid_size = (total_elements + block_size - 1) / block_size;
 
     // 2. Asynchronous non-blocking dispatch directly onto the active XLA/PyTorch execution stream
@@ -151,16 +151,16 @@ void execute_photonic_jitter_squelch_kernel(
         total_elements
     );
 
-       // 3. C++20 표준 속성 위치 수정 및 비동기 파이프라인 최적화
+    // 3. C++20 Attribute Alignment & Asynchronous Pipeline Optimization
     cudaError_t dispatch_err = cudaGetLastError();
     
-    // [[unlikely]] 속성을 중괄호 앞에 올바르게 배치하여 분기 예측 부하를 0ns로 유지
+    // Properly fits the [[unlikely]] attribute prior to the brace scope to maintain a deterministic 0-ns branch prediction burden.
     if (dispatch_err != cudaSuccess) [[unlikely]] {
-        // 프로덕션 환경에서 호스트 스트림을 마비시키는 printf 대신 
-        // 런타임이 에러를 잡아서 복구 메커니즘을 돌릴 수 있도록 표준 예외를 발생시키거나 리턴합니다.
+        // Suppresses legacy printf statements that paralyze the host stream in production; 
+        // throws standard runtime exceptions to allow the upstream infrastructure wrapper to harvest and execute recovery routines.
         throw std::runtime_error("[FNG KERNEL FATAL]: PTX MUX Kernel launch failed: " + 
                                  std::string(cudaGetErrorString(dispatch_err)));
     }
 }
 
-    } // extern "C"
+} // extern "C"
