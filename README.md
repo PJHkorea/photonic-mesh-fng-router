@@ -73,7 +73,7 @@ python test_photonic_pipeline.py
 
 The following sections outline our early-stage exploratory efforts across each architectural tier. We warmly welcome any feedback or optimizations from the community.
 
-### 1. Layer 1: Bare-Metal Photonic Kernel (`/src/photonic_mesh_core_kernel.cu`)
+### 1. Layer 1: Bare-Metal Photonic Kernel (`photonic_mesh_core_kernel.cu`)
 This layer represents an experimental attempt to interface directly at the hardware boundary:
 * **Warp Shuffle Phase Alignment:** We operate at the GPU register boundary using `__shfl_sync` intrinsics. This is a gentle approach to broadcasting incoming optical token layouts while trying to avoid the overhead of global shared memory banks.
 * **Algebraic MUX Squelch:** To mitigate warp divergence penalties, we are experimenting with translating phase-shift timing errors into an arithmetic multiplier operand rather than using conditional branches: 
@@ -86,7 +86,7 @@ This layer represents an experimental attempt to interface directly at the hardw
 
 
 
-### 2. Layer 1.5: C++ Memory Tunnel (`/src/photonic_bridge_wrapper.cpp`)
+### 2. Layer 1.5: C++ Memory Tunnel (`photonic_bridge_wrapper.cpp`)
 This layer handles the fragile bridge between physical hardware signals and high-level execution graphs:
 * **0-Byte Pointer Interception:** Utilizing DLPack primitives and `__cuda_array_interface__` v3, we attempt to establish a zero-copy link between the physical Optical Network Interface (ONI) memory buffers and JAX/XLA matrix engines.
 * **Lifecycle Isolation:** We encapsulate the memory address window within a C++ fence. This is done to test if we can shield the deterministic flight timing of photons from high-level Python Garbage Collection (GC) pauses and runtime noise.
