@@ -62,7 +62,6 @@ def execute_optical_viscous_rectifier_kernel(raw_pulse_stream, phase_jitter_mask
     damped_wavefront = raw_pulse_stream + (viscosity_alpha * laplacian_wavefront)
 
     
-         # (이전 ❶번 라플라시안 선형 가속 수식 하단부와 연결)
     const_one = jnp.array(1.0, dtype=target_dtype)
     purified_pulse_stream = damped_wavefront * (const_one - phase_jitter_mask)
     
@@ -134,7 +133,7 @@ def freeze_photonic_compiler_graph(batch_size, seq_len, hidden_dim, time_steps, 
     abstract_mask = jax.ShapeDtypeStruct((time_steps, distributed_nodes, jitter_axis, 1), jnp.float32)
     
     # Lower and compile the pipeline into a static, immutable hardware HLO binary graph
-    # [리팩토링 확인] shard_map 내부로 전이된 타임슬라이싱 및 All-Gather 통신 정형화 덕분에 
+    # shard_map 내부로 전이된 타임슬라이싱 및 All-Gather 통신 정형화 덕분에 
     # XLA 컴파일러가 분산 그래프 분기를 일으키지 않고 단일 정적 가속 실행문으로 바인딩합니다.
     lowered_graph = jax.jit(compute_photonic_attention_rail_fusion).lower(
         abstract_q, abstract_k, abstract_v, abstract_mask
