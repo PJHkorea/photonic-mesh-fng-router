@@ -18,7 +18,7 @@ if not os.path.exists("/usr/local/cuda") and "CUDA_HOME" not in os.environ:
     print("               Ensure NVCC is resident within environment PATH to avoid linker failure.")
 
 # ❶ Precision-Engineered Compiler & Linker Flag Configuration
-# [리팩토링 완료] nvcc 표준 옵션 대시 규격 타이포를 수정하고, 글로벌 상용 가속기 노드 배포 범용성을 확보합니다.
+# [REFACTORED]: Corrects standard NVCC option hyphen syntax typos and establishes universal deployment compatibility across global production accelerator nodes.
 extra_compile_args = {
     "cxx": [
         "-O3",                      # Extreme global loop-unrolling and optimization
@@ -29,22 +29,22 @@ extra_compile_args = {
     ],
     "nvcc": [
         "-O3",                      # Extreme device-side code optimization
-        "--std=c++20",              # [★교정★] nvcc 파서 전용 더블 대시(--) 명세로 컴파일러 충돌 완전 제거
+        "--std=c++20",              # [★CORRECTED★]: Utilizes the NVCC parser-specific double-hyphen (--) specification to thoroughly eliminate compiler conflicts.
         "--use_fast_math",          # Force SFU-native single-clock reciprocal/sqrt circuits
         "-Xcompiler", "-fPIC",      # Forward PIC flag directly to the underlying host compiler
-        # Target Architecture Occupancy: 범용 가속기 환경(A100, H100, RTX4090)을 완벽하게 수용합니다.
+        # Target Architecture Occupancy: Seamlessly accommodates a universal suite of production accelerator environments (Ampere / Ada Lovelace / Hopper).
         "-gencode=arch=compute_80,code=sm_80",   # Ampere (A100 / GA100)
         "-gencode=arch=compute_86,code=sm_86",   # Ampere (RTX 3090 / A6000)
         "-gencode=arch=compute_89,code=sm_89",   # Ada Lovelace (RTX 4090 / L40)
-        "-gencode=arch=compute_90,code=sm_90"    # [★교정★] Hopper 글로벌 범용 호환 코드 명세로 정렬 (H100)
+        "-gencode=arch=compute_90,code=sm_90"    # [★CORRECTED★]: Aligns explicitly with the Hopper architecture global compatibility specifications (H100).
     ]
 }
 
 
 # ❷ Define the High-Speed Native Extension Object (Layer 1.5 Bridge Binding)
 # Surgically stitches the .cu kernel and the .cpp wrapper into a unified binary capsule module.
-# [★교정★] 익스텐션 모듈의 네임스페이스를 파이썬 패키지 내부 가상 디렉터리 경로명과 무결하게 동기화합니다.
-# 이로 인해 링커가 바이너리를 엉뚱한 루트 공간에 버려두지 않고 패키지 내부 버스에 완벽하게 일체화시킵니다.
+# [★CORRECTED★]: Synchronizes the extension module's namespace with the virtual directory paths of the internal Python package with absolute integrity.
+# This prevents the linker from abandoning the compiled binaries in an incorrect root space, seamlessly fusing them into the internal package layout bus.
 photonic_native_extension = CUDAExtension(
     name="photonic_mesh_fng_router.torch_photonic_bridge_fence_backend", 
     sources=[
@@ -66,9 +66,9 @@ setup(
     long_description="Silicon-Neural Interleaved Optical Infrastructure Control Plane Engine",
     long_description_content_type="text/plain",
     
-    # [★교정★] 개별 py_modules 탑레이어 노출 대신, 컴파일된 바이너리와 파이썬 오케스트레이터 자산들이 
-    # 'photonic_mesh_fng_router'라는 단일 통일 통합 패키지 네임스페이스 공간으로 묶이도록 유도합니다.
-    # 이 구조적 매핑 전환을 통해 인스톨 즉시 발생하는 모든 ModuleNotFoundError 오탐지를 원천 차단합니다.
+    # [★CORRECTED★]: Bypasses raw, separate top-layer py_modules exposure; forces compiled binary entities and Python orchestrator assets 
+    # to be clustered under a unified 'photonic_mesh_fng_router' monolithic package namespace.
+    # This structural mapping transition fundamentally eradicates all false-positive ModuleNotFoundError anomalies immediately upon installation.
     packages=find_packages(),
     
     # Mount the compiled binary extension directly inside python module memory space
@@ -93,6 +93,7 @@ setup(
     ],
     zip_safe=False
 )
+
 
 print("=========================================================================")
 print("[FNG COMPILER INFRASTRUCTURE BUILD COMPLETE]")
