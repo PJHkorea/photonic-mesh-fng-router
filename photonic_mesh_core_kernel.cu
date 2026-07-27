@@ -43,28 +43,29 @@ extern "C" {
  * executing spatial Laplacian smoothing across warp registers.
  */
 __global__ void photonic_jitter_squelch_cuda_kernel(
-    const float* __restrict__ d_raw_pulse,       // Shape: [Total_Elements] (Flattened 4D Photonic Stream)
-    const unsigned int* __restrict__ d_oni_mask, // Shape: [Total_Elements] (Hardware Register Fault Flags)
-    float* __restrict__ d_purified_tensor,       // Shape: [Total_Elements] (Output Purified View)
+    const float* __restrict__ d_raw_pulse,       // Shape: [Total_Elements]
+    const unsigned int* __restrict__ d_oni_mask, // Shape: [Total_Elements]
+    float* __restrict__ d_purified_tensor,       // Shape: [Total_Elements]
     const int total_elements
 ) {
     // ❶ Global Thread Topology Mapping to Hardware Execution Grid
     int block_offset = blockIdx.x * blockDim.x;
     int thread_idx   = block_offset + threadIdx.x;
     
-    // Strict hardware boundary fence to lock grid dimension anomalies
-    if (thread_idx >= total_elements) return;
+    // [수정] 조기 return을 제거하여 모든 레인(Lane)이 워프 집단 연산에 참여하도록 강제합니다.
+    // 경계 밖의 쓰레드(Tail lanes)는 안전하게 0 또는 기본값으로 레지스터를 초기화합니다.
+    bool is_valid_thread = (thread_idx < total_elements);
     
     // ❷ Tiled Warp Partitioning (Clustering 32-threads as a single physical execution unit)
     cg::thread_block_tile<32> warp_tile = cg::tiled_partition<32>(cg::this_thread_block());
     int lane_id = warp_tile.thread_rank();
     
-    // Coalesced memory injection directly into the target execution registers
-    float raw_pulse_register  = d_raw_pulse[thread_idx];
-    unsigned int raw_oni_mask = d_oni_mask[thread_idx];
+    // [수정] 유효한 스레드 영역만 글로벌 메모리에서 데이터를 주입(Coalesced Memory Access)합니다.
+    float raw_pulse_register  = is_valid_thread ? d_raw_pulse[thread_idx] : 0.0f;
+    unsigned int raw_oni_mask = is_valid_thread ? d_oni_mask[thread_idx] : 0;
     
     // ❸ 1-Clock Crossbar Shuffling: Spatial Laplacian Approximation
-    // Interchanges boundary elements directly through internal silicon traces without shared memory stalls.
+    // 모든 레인이 살아있으므로 셔플 연산이 데드락이나 무효 데이터 없이 동기 클럭 내에 완벽하게 완결됩니다.
     float right_neighbor = warp_tile.shfl_down(raw_pulse_register, 1);
     float left_neighbor  = warp_tile.shfl_up(raw_pulse_register, 1);
     
@@ -75,28 +76,38 @@ __global__ void photonic_jitter_squelch_cuda_kernel(
     right_neighbor = pinn_branchless_select_f32(is_right_edge, raw_pulse_register, right_neighbor);
     left_neighbor  = pinn_branchless_select_f32(is_left_edge, raw_pulse_register, left_neighbor);
     
-    // ❺ Compressible Optical Vorticity Damping (Burgers' Formulation Formulation)
-    // 2nd-order spatial differentiation computed entirely within registers (0% HBM Bandwidth leak)
+    // ❺ Compressible Optical Vorticity Damping (Burgers' Formulation)
     float laplacian_wavefront = right_neighbor + left_neighbor - (2.0f * raw_pulse_register);
     const float viscosity_alpha = 0.015f;
     float damped_wavefront    = raw_pulse_register + (viscosity_alpha * laplacian_wavefront);
     
     // ❻ Global Shock-wave Fault Telemetry Gathering
-    // Aggregates optical disconnection states across the entire 32-lane warp via hardware activemask ballot.
     unsigned int global_oni_active = warp_tile.ballot(raw_oni_mask);
     
     // ❼ Micro-circuit Multiplexing: Flush contaminated tensors to zero baseline atomically
-    // If any optical transceiver node inside the lane exhibits catastrophic phase failure, flush to 0.0f
+    // [수정] 32비트 전체 마스크에서 '현재 내 스레드 레인(lane_id)'에 해당하는 비트 필드만 정밀 파싱합니다.
+    // 이로써 인접 레인의 독립적인 정상 데이터를 완벽하게 보호(오염 방지)할 수 있습니다.
+    unsigned int local_oni_fault = (global_oni_active >> lane_id) & 1;
+    
     float purified_output = pinn_branchless_select_f32(
-        global_oni_active, 
+        local_oni_fault, // 워프 전체 마스크 대신 나만의 결함 플래그 전달
         0.0f,               // Clean vacuum erasure state
         damped_wavefront    // Purified physical tensor matrix
     );
+
     
     // Commit back into unified memory grid view
     d_purified_tensor[thread_idx] = purified_output;
 }
 
+
+    // ❽ Unified Memory Grid View Commit Barrier
+    // [수정] 동기화 연산을 위해 살려두었던 테일 레인(Tail lanes)들이 
+    // 글로벌 메모리 경계 밖을 침범하여 쓰기 연산을 수행하지 않도록 물리적 가드를 적용합니다.
+    if (thread_idx < total_elements) {
+        d_purified_tensor[thread_idx] = purified_output;
+    }
+}
 
 /**
  * 🚀 Host-side C++ Trampoline Linker called by Layer 1.5 Bridge (photonic_bridge_wrapper.cpp)
@@ -122,6 +133,13 @@ void execute_photonic_jitter_squelch_kernel(
         d_purified_tensor,
         total_elements
     );
-}
 
+    // [추가] 커널 실행 명령 자체의 잠재적 하드웨어 거부 상태를 비동기로 트래킹합니다.
+    // 0ns 스트림 디스패치 성능에 오버헤드를 주지 않으면서 런타임 디버깅 안정성을 확보합니다.
+    cudaError_t dispatch_err = cudaGetLastError();
+    if (dispatch_err != cudaSuccess) {
+        // 실제 운영 환경이나 벤치마크 루프에서 크래시 발생 지점을 정확히 스캔할 수 있도록 보장합니다.
+        printf("[FNG KERNEL FATAL]: PTX MUX Kernel launch failed: %s\n", cudaGetErrorString(dispatch_err));
+    }
+}
 } // extern "C"
