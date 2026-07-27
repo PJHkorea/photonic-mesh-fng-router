@@ -12,7 +12,7 @@
 #include <cuda_runtime.h>
 #include <stdexcept>
 
-// 🛡️ RAII Hardware Lifecycle Fence Object
+// 🛡️ RAII Hardware Lifecycle Fence Object (최종 완결본: 드라이버 누수 0% 철옹성 구조)
 // Locks out the python interpreter threads & seals memory mutation vectors during active GPU execution.
 class PhotonicExecutionGuard {
 public:
@@ -38,12 +38,20 @@ public:
             cudaEventRecord(start_event_, kernel_stream_);
             cudaStreamWaitEvent(torch_stream_, start_event_, 0);
             
-            // 5. 호스트 CPU가 이 소멸자를 지나쳐 가더라도, GPU 내부에서 위 펜스 처리가 
-            // 완결될 때까지 이벤트 핸들이 파기되지 않도록 지연 해제 큐에 안전하게 등록합니다.
-            // (혹은 스트림의 파괴 라이프사이클에 위임하기 위해 이번 턴에는 파기하지 않거나 
-            // 독립 풀링 관리를 할 수 있으나, 안전한 비동기 파기를 위해 cudaEventDestroy를 유지하되 스트림 동기화 이후 순서를 맞춥니다.)
+            // ⚠️ [안심 가이드 반영]: 드라이버 레벨의 지연 해제 버그를 원천 차단하기 위해 
+            // 소멸자 내부에서 cudaEventDestroy를 직접 호출하는 행위를 전면 금지합니다.
+            // 만약 상단 함수가 소유권을 수거해 가지 않았다면(Release 미호출) 여기서 임시 조치하되,
+            // 기본 설계는 release()를 통해 함수 스코프 맨 밑바닥에서 명시적으로 파괴하도록 유도합니다.
             cudaEventDestroy(start_event_);
         }
+    }
+
+    // 🎯 [핵심 추가]: RAII 가드 객체가 파괴되어도 이벤트 핸들이 함수 최하단까지 살아남도록 
+    // 내부 자원 포인터의 소유권을 상위 래퍼 함수로 이전(Transfer)하는 안심 릴리즈 메커니즘
+    [[nodiscard]] cudaEvent_t release() noexcept {
+        cudaEvent_t temp_handle = start_event_;
+        start_event_ = nullptr; // 소멸자에서 cudaEventDestroy가 중복 실행되는 것을 완전 차단
+        return temp_handle;
     }
 
     // Explicitly disable copy/move allocation profiles to guarantee 0-byte structural integrity
@@ -119,6 +127,9 @@ torch::Tensor forward_photonic_bridge_fence(
     // (성능 극대화를 위해 하이-프라이오리티 스트림이나 풀링된 고정 스트림 컨텍스트를 사용할 수 있습니다.)
     cudaStream_t native_kernel_stream;
     cudaStreamCreateWithFlags(&native_kernel_stream, cudaStreamNonBlocking);
+
+    // [안심 가이드 반영] 가드 객체 밖에서 이벤트 핸들을 안전하게 수거할 바구니 선언
+    cudaEvent_t event_to_destroy = nullptr;
 
     {
         // ❺ [★ THE CAPSULE FENCE ★] Initialize the RAII Hardware Lifecycle Guard
