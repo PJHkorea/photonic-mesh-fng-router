@@ -149,10 +149,3 @@ def inject_photonic_fng_infrastructure_hook(
     return model
 
             
-    if patched_layers_count == 0:
-        print("[FNG WARNING]: Runtime hijacking completed but 0 target attention layers were matched. Check model topology signature.")
-    else:
-        print(f"[FNG SUCCESS]: Sucessfully intercepted and hot-swapped {patched_layers_count} attention blocks. System status: 100% Optical Rail Fusion.")
-        
-    return model
-
