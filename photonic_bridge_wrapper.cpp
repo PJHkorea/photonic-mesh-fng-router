@@ -129,16 +129,14 @@ torch::Tensor forward_photonic_bridge_fence(
     cudaStreamCreateWithFlags(&native_kernel_stream, cudaStreamNonBlocking);
 
     // [안심 가이드 반영] 가드 객체 밖에서 이벤트 핸들을 안전하게 수거할 바구니 선언
+        // [안심 가이드 반영] 가드 객체 밖에서 이벤트 핸들을 안전하게 수거할 바구니 선언
     cudaEvent_t event_to_destroy = nullptr;
 
     {
         // ❺ [★ THE CAPSULE FENCE ★] Initialize the RAII Hardware Lifecycle Guard
-        // PyTorch 진입 스트림과 커널 전용 독립 스트림을 동시에 주입하여 교차 펜스를 생성합니다.
-        // 이를 통해 CPU 블로킹 없이 GPU 내부 큐 단계에서 완벽한 비동기 선후 정렬을 전개합니다.
         PhotonicExecutionGuard lifecycle_fence(native_torch_stream, native_kernel_stream);
 
         // ❻ Dispatch the native, branchless PTX Assembly circuit kernel (Layer 1 Core Engine)
-        // 정렬된 가속기 전용 내부 비동기 스트림(native_kernel_stream)에 0ns 속도로 주입됩니다.
         execute_photonic_jitter_squelch_kernel(
             d_raw_pulse,
             d_mask,
@@ -146,15 +144,24 @@ torch::Tensor forward_photonic_bridge_fence(
             total_elements,
             native_kernel_stream
         );
-    } // <- lifecycle_fence 소멸자 호출: 커널 스트림의 완료 이벤트가 PyTorch 스트림으로 안전하게 토스됩니다.
 
-    // 사용이 끝난 내부 비동기 스트림 핸들을 파기합니다. (이벤트가 이미 완료를 펜싱했으므로 안전함)
+        // 🎯 [수정 및 교정]: 소멸자 호출 전 release()를 통해 소유권을 외부 핸들로 안전하게 가로챕니다.
+        event_to_destroy = lifecycle_fence.release();
+    } // <- lifecycle_fence 소멸자 자동 호출; 내부 핸들이 nullptr이므로 중복 파괴 및 버그가 완전 차단됩니다.
+
+    // ❼ [하드웨어 안심 가이드 최종 지점]: 
+    // 비동기 커널이 하드웨어 큐에 완벽히 등록된 직후, 안전한 호스트 스코프에서 이벤트를 최종 파기합니다.
+    if (event_to_destroy) [[likely]] {
+        cudaEventDestroy(event_to_destroy);
+    }
+
+    // 사용이 끝난 내부 비동기 스트림 핸들을 파기합니다.
     cudaStreamDestroy(native_kernel_stream);
 
-    // ❼ Return the clean, purified tensor view directly compatible with Llama/DeepSeek rails
-    // 하드웨어 큐에 완벽히 정렬 기록된 무복사 텐서 뷰포트를 모델 메인 고속도로에 즉시 반환합니다.
+    // ❽ Return the clean, purified tensor view directly compatible with Llama/DeepSeek rails
     return purified_output_tensor;
 }
+
 
 
 // 📝 PyBind11 High-Speed Binary Module Binding Blueprint
