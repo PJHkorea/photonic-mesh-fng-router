@@ -17,7 +17,7 @@ __license__ = "Apache License 2.0"
 
 # ❶ Atomic Hardware & Binary Linkage Validation
 # Before letting any upper-layer script initialize, confirm that the compiled 
-// high-speed C++ Front-end (Layer 1.5) is resident in the environment's path tree.
+# high-speed C++ Front-end (Layer 1.5) is resident in the environment's path tree.
 try:
     import torch_photonic_bridge_fence_backend as _bridge_backend
 except ImportError as err:
@@ -29,14 +29,14 @@ except ImportError as err:
     ) from err
 
 # ❷ Absolute Namespace Encapsulation (Clean Room Topology)
-# Selectively promotes only the clean runtime-jacking and graph freezing assets to the user plane.
 # Completely seals internal compilation pipelines, structures, and pointer math metrics from leaking out.
-from .fng_fabric_monkey_patch import inject_photonic_fng_infrastructure_hook
-from .photonic_fng_orchestrator import (
+from fng_fabric_monkey_patch import inject_photonic_fng_infrastructure_hook
+from photonic_fng_orchestrator import (
     compute_photonic_attention_rail_fusion,
     freeze_photonic_compiler_graph,
     photonic_hardware_mesh
 )
+
 
 # ❸ Expose explicit manifest endpoints for external distributed frameworks (Megatron/vLLM)
 __all__ = [
@@ -48,9 +48,10 @@ __all__ = [
 
 # ❹ Initialize Boot-time Telemetry Logging Signal
 # Emits a clean structural declaration confirming that the 0ns optical rail system is armed.
-print(f"=========================================================================")
-  f"[FNG COMPILER INFRASTRUCTURE INITIALIZED]")
+print("=========================================================================")
+print("[FNG COMPILER INFRASTRUCTURE INITIALIZED]")
 print(f" -> Architecture Rail Style: Silicon Photonics Co-Design Control Plane")
 print(f" -> System Core Version    : {__version__}")
 print(f" -> Legal License Fencing   : Apache 2.0 (Defensive Patent Shield Active)")
-print(f"=========================================================================")
+print("=========================================================================")
+
