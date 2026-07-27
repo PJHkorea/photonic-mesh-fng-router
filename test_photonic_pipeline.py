@@ -29,21 +29,20 @@ class StatefulPhotonicTurbulenceInjector:
         self.jitter_axis = jitter_axis
         self.device = device
 
-    def generate_catastrophic_blackout_mask(self, time_steps: int, drop_rate: float = 0.88) -> torch.Tensor:
+        def generate_catastrophic_blackout_mask(self, time_steps: int, drop_rate: float = 0.88) -> torch.Tensor:
         """
         Injects a massive physical link failure mask directly onto the hardware lane.
         Values of 1 denote total optical path destruction (Squelch trigger).
         """
-        # [무결성 확인] 액티브 VRAM 레일 메모리 선상에 원시 균등 분포 매트릭스를 난수 할당합니다.
+        # [VERIFYING SYSTEM INTEGRITY]: Randomly allocates a raw uniform distribution matrix directly onto the active VRAM rail memory vectors.
         raw_noise = torch.rand((time_steps, self.nodes, self.jitter_axis, 1), device=self.device)
         
-        # [리팩토링] 최하단 Layer 1.5 C++ 캡슐 펜스 및 Layer 1 PTX inline 'selp' 회로의 프레디케이트 스펙과 
-        # 비트 정렬 상태를 완벽히 일치시키기 위해, 마스크 생성 데이터 타입을 기존 float32에서 torch.int32로 전면 정렬합니다.
-        # 이를 통해 런타임 캐스팅 변환 오버헤드를 0ns로 억제하고 데이터 버스 대역폭 효율을 최적화합니다.
+        # [REFACTORED]: Aligns the mask generation datatype from float32 to torch.int32 to perfectly match the predicate specifications 
+        # and bit-alignment of the underlying Layer 1.5 C++ capsule fence and Layer 1 PTX inline 'selp' circuits.
+        # This suppresses runtime casting transformation overheads down to absolute 0ns while optimizing data bus bandwidth efficiency.
         fault_mask = (raw_noise < drop_rate).to(torch.int32)
         
         return fault_mask
-
 
 
 class DummyProprietaryAttentionBlock(nn.Module):
@@ -60,10 +59,10 @@ class DummyProprietaryAttentionBlock(nn.Module):
         self.v_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
         self.o_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
         
-        # [고도화/추가] 벤치마크 리포트 결과물(Purified Vector Norm L2)의 완벽한 재현성을 위해 
-        # 난수 초기화 상태인 가중치 매트릭스를 정형 오소고날(Orthogonal) 레이아웃으로 동결합니다.
-        # 이를 통해 전 세계 어떤 엔지니어가 이 깃 레포를 긁어서 실행해도 100% 동일한 정적 홈오브스타시스 지표를 얻게 됩니다.
-        torch.manual_seed(42)  # 시드 락을 통한 재현성 보장
+        # [ADVANCED EXTENSION]: Freezes the randomly initialized weight matrices into a standardized orthogonal layout 
+        # to guarantee absolute reproducibility of the benchmark metric reports (Purified Vector Norm L2).
+        # This deterministic constraint ensures that any engineer pulling this repository globally will yield identical homeostasis metrics.
+        torch.manual_seed(42)  # Enforces reproducibility locks via static seed seeding
         nn.init.orthogonal_(self.q_proj.weight)
         nn.init.orthogonal_(self.k_proj.weight)
         nn.init.orthogonal_(self.v_proj.weight)
@@ -115,21 +114,21 @@ def run_integrated_photonic_stress_benchmark():
     # ❹ Setup the Stateful Fault Injector Plane
     fault_injector = StatefulPhotonicTurbulenceInjector(distributed_nodes, jitter_axis, device=device)
 
-    # ❺ Warm-up Session (Forces XLA binary layouts to lock cache residency)
+       # ❺ Warm-up Session (Forces XLA binary layouts to lock cache residency)
     print("[FNG INFO]: Launching 5 execution warm-up cycles to lock cache lines...")
     for _ in range(5):
-        # 웜업 단계에서도 임시 마스크를 공급하여 가속기 캐시 라인을 동결합니다.
+        # Feeds transient masks even during the warm-up sequence to thoroughly freeze accelerator cache line residency.
         fused_optical_layer.oni_hardware_register_stream = fault_injector.generate_catastrophic_blackout_mask(time_steps, drop_rate=0.88)
         _ = fused_optical_layer(hidden_states_feed)
     torch.cuda.synchronize()
 
-      # ❻ Active Profiling Session via Native CUDA Hardware Event Timers
+    # ❻ Active Profiling Session via Native CUDA Hardware Event Timers
     start_event = torch.cuda.Event(enable_timing=True)
     end_event = torch.cuda.Event(enable_timing=True)
     iterations = 50
     
-    # [★ 성능 왜곡 차단 ★]: 파이썬 호스트 단의 난수 생성 오버헤드가 
-    # 가속기 커널 Latency를 오염시키지 않도록, 50회 루프 분량의 결함 마스크를 미리 pre-allocate하여 고속 배열로 바인딩합니다.
+    # [★ BLOCKING PERFORMANCE ISOLATION CONTAMINATION ★]: Pre-allocates 50 iterations worth of failure masks and binds them as a high-speed array 
+    # to fundamentally block Python host-side random number generation overhead from corrupting accelerator kernel execution latencies.
     pre_allocated_masks = [
         fault_injector.generate_catastrophic_blackout_mask(time_steps, drop_rate=0.88)
         for _ in range(iterations)
@@ -137,13 +136,13 @@ def run_integrated_photonic_stress_benchmark():
     
     print(f"[FNG INFO]: Firing {iterations} production-level stress iterations...")
     
-    # 스트림 하드웨어를 깨끗이 비워 순수 커널 시간만 마크하기 위한 배리어 동기화
+    # Enforces barrier synchronization to purge active stream hardware pipelines, isolating pure kernel execution windows.
     torch.cuda.synchronize()
     
-    # 순수 0ns 광학 레일 연산 인터벌만 타임 트래킹 범위로 한정
+    # Restricts the hardware time-tracking interval strictly to the pure 0-ns optical rail execution scope.
     start_event.record()
     for i in range(iterations):
-        # 프리-알로케이션된 캐시 스트림에서 오버헤드 없이 포인터 즉시 교체
+        # Hot-swaps pointers instantly out of pre-allocated cache streams without introducing runtime computation overhead.
         fused_optical_layer.oni_hardware_register_stream = pre_allocated_masks[i]
         
         # Forward pass runs entirely within the zero-copy branchless pipeline
@@ -151,17 +150,17 @@ def run_integrated_photonic_stress_benchmark():
         
     end_event.record()
     
-     # [하드웨어 안심 가이드] 하드웨어 큐에 쌓인 연산이 완전히 완료될 때까지 호스트(CPU)를 동기화 대기시킵니다.
+    # [HARDWARE INTEGRITY BOUNDARY]: Synchronizes the host (CPU) to wait blockingly until all asynchronous execution queues inside the hardware are fully resolved.
     torch.cuda.synchronize()
     
-    # [★ 버그 수정 및 중복 도려내기 ★]: 
-    # TypeError를 내뿜던 3인자 형태(start_event, end_event)와 중복 라인을 완전히 제거하고,
-    # 순수 인스턴스 규격(end_event만 전달)에 맞춰 단 한 번만 클럭 시간을 연산합니다.
+    # [★ BUG FIX & REDUNDANCY EXCISION ★]: 
+    # Completely excises the redundant lines and the legacy 3-argument signature (start_event, end_event) that triggered TypeError anomalies; 
+    # aligns with the pure instance specification (passing only end_event) to compute silicon clock duration exactly once.
     total_execution_ms = start_event.elapsed_time(end_event)
     average_latency_ms = total_execution_ms / iterations
 
     # ❼ Strict Numerical Asset Fencing & Integrity Assessment
-    # 실리콘 인프라 레일 내부의 수치적 항상성(Homeostasis)을 검증하기 위한 최종 배리어입니다.
+    # Acts as the final defensive boundary to mathematically validate numerical homeostasis directly inside the silicon infrastructure rail.
     contains_nan = torch.isnan(purified_context_output).any().item()
     contains_inf = torch.isinf(purified_context_output).any().item()
     output_vector_norm = torch.norm(purified_context_output).item()
