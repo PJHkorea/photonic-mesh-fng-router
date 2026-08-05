@@ -125,7 +125,6 @@ You can try experimenting with the infrastructure hook using the following small
 ```python
 import torch
 from transformers import AutoModelForCausalLM
-# [★교정★] setup.py 패키징 네임스페이스 경로 일치화에 맞춰 무결하게 연동되도록 임포트 타깃을 정렬합니다.
 from photonic_mesh_fng_router import inject_photonic_fng_infrastructure_hook
 
 # 1. Load your Hyperscale Parameter Model (e.g., DeepSeek-V4)
