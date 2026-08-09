@@ -24,13 +24,14 @@ __device__ __forceinline__ float pinn_branchless_select_f32(
 ) {
     float output_reg;
     
-       // 1. Deploys 'setp' (set predicate) to map the C++ bool/int input directly into the PTX 1-bit predicate register (%p).
-    // 2. Executes a single-clock register swap via the 'selp.f32' instruction based on the predicate register condition.
-    asm (
+    // 1. Deploys 'setp' (set predicate) to map the C++ bool/int input directly into a localized virtual predicate register.
+    // 2. Executes a single-clock register swap via the 'selp.f32' instruction based on the localized predicate condition.
+    // [PATCH]: Replaced the hardcoded '%p' symbol with a unique compiler-scoped 'p_state' identifier to avoid register re-declaration errors during inline unrolling.
+    asm volatile (
         "{\n\t"
-        "  .reg .pred %p;\n\t"           // Declares a dedicated 1-bit predicate register.
-        "  setp.ne.u32 %p, %3, 0;\n\t"   // Sets %p to true if condition (%3) evaluates to non-zero.
-        "  selp.f32 %0, %1, %2, %p;\n\t" // Conditionally selects true_val or false_val depending on the %p predicate bit.
+        "  .reg .pred p_state;\n\t"           // Declares a dedicated compiler-scoped 1-bit predicate register.
+        "  setp.ne.u32 p_state, %3, 0;\n\t"   // Sets p_state to true if condition (%3) evaluates to non-zero.
+        "  selp.f32 %0, %1, %2, p_state;\n\t" // Conditionally selects true_val or false_val depending on the p_state predicate bit.
         "}"
         : "=f"(output_reg)
         : "f"(true_val), "f"(false_val), "r"((unsigned int)condition)
@@ -38,6 +39,7 @@ __device__ __forceinline__ float pinn_branchless_select_f32(
     
     return output_reg;
 }
+
 
 extern "C" {
 
@@ -73,11 +75,11 @@ __global__ void photonic_jitter_squelch_cuda_kernel(
     float right_neighbor = warp_tile.shfl_down(raw_pulse_register, 1);
     float left_neighbor  = warp_tile.shfl_up(raw_pulse_register, 1);
 
-    
-      unsigned int has_right_data = warp_tile.shfl_down((unsigned int)is_valid_thread, 1);
+    unsigned int has_right_data = warp_tile.shfl_down((unsigned int)is_valid_thread, 1);
     unsigned int has_left_data  = warp_tile.shfl_up((unsigned int)is_valid_thread, 1);
+
     
-    // ❹ Boundary Clamping: Concurrently guards the logical data boundary as well as the physical warp limits (0, 31).
+        // ❹ Boundary Clamping: Concurrently guards the logical data boundary as well as the physical warp limits (0, 31).
     // Replicates its own register state if no valid data exists to the right (tail block fringe) or the physical warp boundary (31) is reached.
     bool is_right_edge = (lane_id == 31) || (has_right_data == 0);
     bool is_left_edge  = (lane_id == 0)  || (has_left_data == 0);
@@ -132,10 +134,12 @@ void execute_photonic_jitter_squelch_kernel(
     int block_size = 0;
     int min_grid_size = 0;
     
+    // [PATCH]: Removed the explicit '(void*)' function pointer truncation cast. 
+    // This allows the NVCC compiler template engine to preserve full type signature tracking and avoid type registry conflicts.
     cudaOccupancyMaxPotentialBlockSize(
         &min_grid_size,
         &block_size,
-        (void*)photonic_jitter_squelch_cuda_kernel,
+        photonic_jitter_squelch_cuda_kernel,
         0,  // Dynamic Shared Memory (SMem) allocation profile.
         0   // Bypasses static block size upper bounds.
     );
