@@ -32,7 +32,9 @@ public:
         }
     }
 
-    ~PhotonicExecutionGuard() {
+    // [PATCH]: Explicitly appending 'noexcept' to guarantee that the hardware cleanup fallback 
+    // never leaks underlying exceptions out of the destructor scope, preventing sudden std::terminate() invocations.
+    ~PhotonicExecutionGuard() noexcept {
         if (start_event_) {
             // 4. Synchronizes the completion event of the dedicated internal kernel stream back onto the primary PyTorch stream.
             cudaEventRecord(start_event_, kernel_stream_);
@@ -46,7 +48,8 @@ public:
         }
     }
 
-    // 🎯 [CORE EXTENSION]: Secure release mechanism designed to transfer internal resource handle ownership 
+
+     // 🎯 [CORE EXTENSION]: Secure release mechanism designed to transfer internal resource handle ownership 
     // to the upper wrapper function, ensuring the event handle outlives the RAII guard instance destruction.
     [[nodiscard]] cudaEvent_t release() noexcept {
         cudaEvent_t temp_handle = start_event_;
@@ -54,17 +57,19 @@ public:
         return temp_handle;
     }
 
-
     // Explicitly disable copy/move allocation profiles to guarantee 0-byte structural integrity
     PhotonicExecutionGuard(const PhotonicExecutionGuard&) = delete;
     PhotonicExecutionGuard& operator=(const PhotonicExecutionGuard&) = delete;
+    // [PATCH]: Explicitly disabled move semantics as well to enforce strict compile-time safety
+    // against accidental object relocation within the asynchronous pipeline.
+    PhotonicExecutionGuard(PhotonicExecutionGuard&&) = delete;
+    PhotonicExecutionGuard& operator=(PhotonicExecutionGuard&&) = delete;
 
 private:
     cudaStream_t torch_stream_;
     cudaStream_t kernel_stream_;
     cudaEvent_t start_event_;
 };
-
 
 extern "C" {
 // ⛓️ Direct linker binding to Layer 1 Core Kernel (photonic_mesh_core_kernel.cu)
@@ -90,7 +95,7 @@ torch::Tensor forward_photonic_bridge_fence(
         throw std::invalid_argument("FNG_BRIDGE_ERROR: Input tensors must reside entirely on the GPU boundary.");
     }
     
-       // To preempt context-switch noise and device-mismatch crashes within multi-GPU acceleration infrastructures, 
+    // To preempt context-switch noise and device-mismatch crashes within multi-GPU acceleration infrastructures, 
     // the device guard is physically pinned to the active VRAM region harboring the input data.
     at::cuda::CUDAGuard device_guard(pytorch_raw_pulse.device());
 
@@ -110,7 +115,8 @@ torch::Tensor forward_photonic_bridge_fence(
                               .dtype(torch::kFloat32)
                               .device(pytorch_raw_pulse.device());
 
-    // ❷ Memory Allocation Zero-Copy Shell
+
+       // ❷ Memory Allocation Zero-Copy Shell
     // Swiftly pre-allocates the destination viewport array alone, circumventing the creation of unmanaged runtime memory bubbles.
     torch::Tensor purified_output_tensor = torch::empty(pytorch_raw_pulse.sizes(), tensor_options);
 
@@ -123,11 +129,17 @@ torch::Tensor forward_photonic_bridge_fence(
     c10::cuda::CUDAStream current_torch_stream = c10::cuda::getCurrentCUDAStream(pytorch_raw_pulse.device().index());
     cudaStream_t native_torch_stream = current_torch_stream.stream();
 
-       // [REFACTORED]: Allocates a dedicated internal asynchronous stream (Kernel Execution Stream) 
+    // [REFACTORED]: Allocates a dedicated internal asynchronous stream (Kernel Execution Stream) 
     // to thoroughly isolate the physical hardware pipeline from Python GC spikes and Autograd tracing overhead.
     // (Note: High-priority streams or pooled static stream contexts can be deployed to further maximize throughput.)
-    cudaStream_t native_kernel_stream;
-    cudaStreamCreateWithFlags(&native_kernel_stream, cudaStreamNonBlocking);
+    cudaStream_t native_kernel_stream = nullptr;
+    // [PATCH]: Implemented a strict infrastructure firewall to validate the runtime creation return status of the unmanaged asynchronous stream, 
+    // shielding against quiet driver failures under heavy multi-tenant production stress.
+    cudaError_t stream_err = cudaStreamCreateWithFlags(&native_kernel_stream, cudaStreamNonBlocking);
+    if (stream_err != cudaSuccess) [[unlikely]] {
+        throw std::runtime_error("FNG_BRIDGE_FATAL: Critical driver failure during non-blocking stream context allocation: " + 
+                                 std::string(cudaGetErrorString(stream_err)));
+    }
 
     // [DRIVER INTEGRITY GUARD]: Declares an external handle repository to safely harvest the event pointer outside the guard scope.
     cudaEvent_t event_to_destroy = nullptr;
@@ -145,7 +157,8 @@ torch::Tensor forward_photonic_bridge_fence(
             native_kernel_stream
         );
 
-        // 🎯 [CORRECTED]: Securely hijacks handle ownership into the external register via release() prior to destructor invocation.
+
+             // 🎯 [CORRECTED]: Securely hijacks handle ownership into the external register via release() prior to destructor invocation.
         event_to_destroy = lifecycle_fence.release();
     } // <- Lifecycle_fence destructor automatically triggers; double-destruction vectors are entirely nullified since the internal handle is now nullptr.
 
@@ -158,8 +171,7 @@ torch::Tensor forward_photonic_bridge_fence(
     // Disposes of the depleted internal asynchronous stream context.
     cudaStreamDestroy(native_kernel_stream);
 
-
-     // ❽ Return the clean, purified tensor view directly compatible with Llama/DeepSeek rails
+    // ❽ Return the clean, purified tensor view directly compatible with Llama/DeepSeek rails
     return purified_output_tensor;
 }
 
@@ -167,6 +179,10 @@ torch::Tensor forward_photonic_bridge_fence(
 // [PROVING SYSTEM INTEGRITY]: Standardizes and freezes the blueprint specifications to enable NVCC and GCC linkers 
 // to statically fuse this C++ extension module directly onto the PyTorch framework binary bus with absolute 0-ns overhead during compilation.
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    // [PATCH]: Explicitly exposed the 'py' namespace token to ensure the cross-compiler linker 
+    // perfectly evaluates the py::call_guard template matrix without a missing symbol failure.
+    namespace py = pybind11;
+
     m.def(
         "forward_photonic_bridge_fence", 
         &forward_photonic_bridge_fence, 
