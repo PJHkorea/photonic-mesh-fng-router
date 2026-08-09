@@ -50,7 +50,7 @@ public:
     // to the upper wrapper function, ensuring the event handle outlives the RAII guard instance destruction.
     [[nodiscard]] cudaEvent_t release() noexcept {
         cudaEvent_t temp_handle = start_event_;
-        start_event = nullptr; // Double-destruction vectors are entirely nullified by severing the reference before destructor firing.
+        start_event_ = nullptr; // Double-destruction vectors are entirely nullified by severing the reference before destructor firing.
         return temp_handle;
     }
 
